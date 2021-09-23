@@ -1,39 +1,54 @@
-import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Future;
+import java.util.concurrent.ConcurrentSkipListMap;
 
 public class Cache<KEY,VALUE> {
 
-    private final Map<KEY, VALUE> map = new ConcurrentHashMap<>(); // Data structure for the cache
+    private final Map<KEY, Record> map = new ConcurrentHashMap<>(); // Data structure for the cache
     // Data source connected to this cache
     private final DataSource<KEY, VALUE> dataSource;
     private final PersistenceAlgorithm persistenceAlgorithm;
     private final EvictionAlgorithm evictionAlgorithm;
+    private final Integer expiryTimeInMillis;
+    private final Map<Long, List<Record<VALUE>>> expiryQueue = new ConcurrentHashMap<>();
+    private final Map<AccessDetails, List<Record<VALUE>>> priorityQueue;
     private static Integer THRESHOLD_SIZE = 500;
 
-    public Cache(DataSource<KEY, VALUE> dataSource, PersistenceAlgorithm persistenceAlgorithm, EvictionAlgorithm evictionAlgorithm) {
+    public Cache(DataSource<KEY, VALUE> dataSource,
+                 PersistenceAlgorithm persistenceAlgorithm,
+                 EvictionAlgorithm evictionAlgorithm,
+                 Integer expiryTimeInMillis, Map<Long, List<Record<VALUE>>> expiryQueue,
+                 Map<AccessDetails, List<Record<VALUE>>> priorityQueue) {
         this.dataSource = dataSource;
         this.persistenceAlgorithm = persistenceAlgorithm;
         this.evictionAlgorithm = evictionAlgorithm;
+        this.expiryTimeInMillis = expiryTimeInMillis;
+        this.priorityQueue = new ConcurrentSkipListMap<>((first, second) -> {
+            if (evictionAlgorithm.equals(EvictionAlgorithm.LRU)){
+            return first.getAccessTimeStamp() - second.getAccessTimeStamp();
+        } else {
+                return first.getAccessCount() - second.getAccessCount();
+            });
+    }
     }
 
-    public Future<VALUE> get(KEY key){
+    public CompletableFuture<VALUE> get(KEY key){
 
-        if (map.containsKey(key)){
-            return CompletableFuture.completedFuture(map.get(key));
+        if (map.containsKey(key) && map.get(key).getAccessTimeStamp() < System.currentTimeMillis() - expiryTimeInMillis){
+            return (CompletableFuture<VALUE>) CompletableFuture.completedFuture(map.get(key)).thenApply(Record::getValue);
         } else {
-            return dataSource.get(key); // Returns the key if not contained in the cache
+            return dataSource.get(key).thenCompose(value -> set(key, value).thenApply(__ -> value)); // Returns the key if not contained in the cache
         }
     }
 
-    public Future<Void> set(KEY key, VALUE value){
-
+    public CompletableFuture<Void> set(KEY key, VALUE value){
+        Record<VALUE> valueRecord = new Record<>(value, loadTime, accessDetails);
         if (!map.containsKey(key) && map.size() >= THRESHOLD_SIZE) {
                 //LRU LFU
-                // updation
-                if (persistenceAlgorithm.equals(PersistenceAlgorithm.WRITE_THROUGH)){
+                if (evictionAlgorithm.equals(evictionAlgorithm.LRU)){
                     dataSource.persist(key, value).
                             thenAccept(__-> map.put(key, value));
                 } else {
@@ -46,59 +61,57 @@ public class Cache<KEY,VALUE> {
             // replacement or direct load
             if (map.size() >= THRESHOLD_SIZE){
         }
+        TreeMap<KEY, Record<VALUE>> treeMap = new TreeMap<>();
+        treeMap.firstEntry();
     }
 }
 
 class Record<VALUE> implements Comparable<Record<VALUE>> {
     private final VALUE value;
-    private long accessTimeStamp;
-    private long accessCount;
+    private long loadTime;
+    private final AccessDetails accessDetails;
 
-    public Record(VALUE value) {
-        this.value = value;
+    public long getLoadTime() {
+        return loadTime;
     }
 
-    /**
-     * Compares this object with the specified object for order.  Returns a
-     * negative integer, zero, or a positive integer as this object is less
-     * than, equal to, or greater than the specified object.
-     *
-     * <p>The implementor must ensure
-     * {@code sgn(x.compareTo(y)) == -sgn(y.compareTo(x))}
-     * for all {@code x} and {@code y}.  (This
-     * implies that {@code x.compareTo(y)} must throw an exception iff
-     * {@code y.compareTo(x)} throws an exception.)
-     *
-     * <p>The implementor must also ensure that the relation is transitive:
-     * {@code (x.compareTo(y) > 0 && y.compareTo(z) > 0)} implies
-     * {@code x.compareTo(z) > 0}.
-     *
-     * <p>Finally, the implementor must ensure that {@code x.compareTo(y)==0}
-     * implies that {@code sgn(x.compareTo(z)) == sgn(y.compareTo(z))}, for
-     * all {@code z}.
-     *
-     * <p>It is strongly recommended, but <i>not</i> strictly required that
-     * {@code (x.compareTo(y)==0) == (x.equals(y))}.  Generally speaking, any
-     * class that implements the {@code Comparable} interface and violates
-     * this condition should clearly indicate this fact.  The recommended
-     * language is "Note: this class has a natural ordering that is
-     * inconsistent with equals."
-     *
-     * <p>In the foregoing description, the notation
-     * {@code sgn(}<i>expression</i>{@code )} designates the mathematical
-     * <i>signum</i> function, which is defined to return one of {@code -1},
-     * {@code 0}, or {@code 1} according to whether the value of
-     * <i>expression</i> is negative, zero, or positive, respectively.
-     *
-     * @param o the object to be compared.
-     * @return a negative integer, zero, or a positive integer as this object
-     * is less than, equal to, or greater than the specified object.
-     * @throws NullPointerException if the specified object is null
-     * @throws ClassCastException   if the specified object's type prevents it
-     *                              from being compared to this object.
-     */
-    @Override
-    public int compareTo(Record<VALUE> record`) {
-        return (int) (accessTimeStamp - record.accessTimeStamp);
+    public void setLoadTime(long loadTime) {
+        this.loadTime = loadTime;
+    }
+
+    public AccessDetails getAccessDetails() {
+        return accessDetails;
+    }
+
+    public Record(VALUE value, long loadTime, AccessDetails accessDetails) {
+        this.value = value;
+        this.loadTime = loadTime;
+        this.accessDetails = accessDetails;
+    }
+    public VALUE getValue() {
+        return value;
+    }
+
+}
+
+class AccessDetails{
+
+    private long accessTimeStamp
+    private long accessCount;
+
+    public long getAccessTimeStamp() {
+        return accessTimeStamp;
+    }
+
+    public void setAccessTimeStamp(long accessTimeStamp) {
+        this.accessTimeStamp = accessTimeStamp;
+    }
+
+    public long getAccessCount() {
+        return accessCount;
+    }
+
+    public void setAccessCount(long accessCount) {
+        this.accessCount = accessCount;
     }
 }
