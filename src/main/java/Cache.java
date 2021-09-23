@@ -1,5 +1,6 @@
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
 
@@ -13,7 +14,7 @@ public class Cache<KEY,VALUE> {
     public Future<VALUE> get(KEY key){
 
         if (map.containsKey(key)){
-
+            return CompletableFuture.completedFuture(map.get(key));
         } else {
             return dataSource.get(key); // Returns the key if not contained in the cache
         }
@@ -21,5 +22,8 @@ public class Cache<KEY,VALUE> {
 
     public Future<Void> set(KEY key, VALUE value){
 
+        if (map.containsKey(key)){
+            //
+        }
     }
 }

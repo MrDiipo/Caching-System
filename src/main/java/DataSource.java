@@ -2,7 +2,7 @@ import java.util.concurrent.Future;
 
 public class DataSource<KEY, VALUE> {
 
-    public Future<VALUE> get(){
+    public Future<VALUE> get(KEY key){
         return null;
     }
 
