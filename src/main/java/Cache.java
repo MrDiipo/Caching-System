@@ -23,7 +23,10 @@ public class Cache<KEY,VALUE> {
     public Future<Void> set(KEY key, VALUE value){
 
         if (map.containsKey(key)){
-            //
+            // updation
+            map.put(key, value);
+        } else{
+            // replacement or direct load
         }
     }
 }
