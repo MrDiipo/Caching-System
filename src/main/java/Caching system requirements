@@ -1,0 +1,8 @@
+The caching system would follow the following requirements:
+1. Listeners on load and evict
+2. Hot loading elements on startup
+3. Multiple eviction algorithms like LRU and LFU
+4. Expiration time
+5. Multiple fetch algorithms like write back and write through
+6. Return futures
+7. Request collapsing.
